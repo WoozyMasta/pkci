@@ -1,0 +1,19 @@
+repack CoreUtils
+UPX
+Trivy DB
+
+repack curl
+repack bash
+repack openssl
+repack grep
+add git
+add jsonnet
+
+https://git.savannah.gnu.org/cgit/tar.git/
+https://git.savannah.gnu.org/cgit/sed.git/
+https://git.savannah.gnu.org/cgit/grep.git/
+
+https://gist.github.com/WoozyMasta/5999de4eaf8aabd3ab971bbdc10e15a3
+
+https://github.com/EXALAB/git-static
+https://gist.github.com/tomislacker/9005963

@@ -1,0 +1,249 @@
+#!/kaniko/bin/bash
+# PKCI (docker login)
+#
+# Pumped Kaniko Container Image or Pumped Kaniko for Continuous Integration
+# =========================================================================
+#
+# License: MIT
+# Copyright 2022 WoozyMasta <me@woozymasta.ru>
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+#
+# =========================================================================
+set -euo pipefail
+
+# Variables
+# =========================================================================
+: "${DOCKER_CONFIG:=${HOME:-.}/.docker}"
+docker_config_file="$DOCKER_CONFIG/config.json"
+default_registry='https://index.docker.io/v1/'
+username="${DOCKER_USERNAME:-}"
+password="${DOCKER_PASSWORD:-}"
+registry="${DOCKER_REGISTRY:-}"
+cmd="$(basename "$0")"
+
+# Functions
+# =========================================================================
+# Messages
+fail() { >&2 printf '\e[0;31mERROR\e[m: %s\n' "$*"; exit 1; }
+info() { printf '\e[0;32mINFO\e[m: %s\n' "$*"; }
+
+# Check config.json readeble and exist .auths dict
+check_config() {
+  [ -s "$docker_config_file" ] ||
+    fail "$docker_config_file accounts file is empty"
+  [ "$(jq -er '.auths | length' "$docker_config_file")" -ne 0 ] ||
+    fail "no accounts in $docker_config_file"
+}
+
+# Get decoded base64 .auth value and split by colon, arg is list index 0 or 1
+get_auth() {
+  local pos=${1:-0}
+  jq -er --arg registry "${registry:-$default_registry}" --arg pos "$pos" \
+    '.auths[$registry].auth | @base64d | split(":")[$pos]' \
+    "$docker_config_file" ||
+    fail "not logged into \"$registry\""
+}
+
+# Authenticate in registry
+registry_login() {
+  # Try get OAuth URL from header
+  auth_header="$(
+    curl -X HEAD -sIL -u "$username:" \
+      "http://${registry:-registry-1.docker.io}/v2/" | \
+    grep -Fi 'www-authenticate:' | tr -dc '[:print:]'
+  )"
+
+  # Parse header for get realm url
+  auth_realm=$(grep -Po '[ ,]realm="\K[^,"]*' <<< "$auth_header")
+  [ -z "${auth_realm:-}" ] &&
+    auth_realm="http://${registry:-auth.docker.io}/token"
+  # Parse header for get service name
+  auth_service=$(grep -Po '[ ,]service="\K[^,"]*' <<< "$auth_header")
+  [ -z "${auth_service:-}" ] &&
+    auth_service="${registry:-registry.docker.io}"
+
+  # Try to get token
+  curl -sfL "$auth_realm?account=$username&service=$auth_service" | \
+    jq -er '.token' || fail "error logging into \"${registry:-docker.io}\":" \
+      'invalid username/password'
+}
+
+# Help message and exit
+help() {
+cat <<help
+Login to a container registry
+
+Description:
+  Login to a container registry on a specified server.
+  docker.io is default container registry
+
+Usage:
+  $cmd [options] [REGISTRY]
+
+Examples:
+  $cmd registry.tld
+  $cmd --username ... --password ... registry.tld
+
+      --get-regitries     Returns a list of logged in registries
+      --get-login         Return the current login user for the registry
+      --get-token         Return a token for an already existing registry
+      --logout            Logout from registry
+  -p, --password string   Password for registry
+      --password-stdin    Take the password from stdin
+      --insecure          Skip HTTPS and verify certificates
+  -u, --username string   Username for registry
+  -h, --help              This help
+
+help
+  exit 0
+}
+
+# Args
+# =========================================================================
+args=$(
+  getopt -o "p:,u:,h" -l "password:username:,get-regitries,get-login" \
+    -l "get-token,logout,password-stdin,insecure,help" -- "$@"
+)
+eval set -- "$args"
+while [ $# -ge 1 ]; do
+  case "$1" in
+    -h|--help)             help;            shift; break;;
+    -u|--username)         username="$2";   shift; shift;;
+    -p|--password)         password="$2";   shift; shift;;
+       --password-stdin)   _pass_stdin=1;          shift;;
+       --get-login)        _get_login=1;           shift;;
+       --get-regitries)    _get_regitries=1;       shift;;
+       --get-token)        _get_token=1;           shift;;
+       --logout)           _logout=1;              shift;;
+       --tls-insecure)     _no_tls=1;              shift;;
+       --)                                  shift; break;;
+       -*)                      fail "invalid option $1";;
+  esac
+done
+
+[ -n "${1:-}" ] && { registry="$1"; shift; }
+[ -n "$*" ] && fail "extra arguments $*"
+
+# Main
+# =========================================================================
+
+# Helpers
+# -------------------------------------------------------------------------
+# [--get-login] Return the current login user for the registry
+if [ "${_get_login:-0}" -eq 1 ]; then
+  check_config
+  get_auth 0
+  exit 0
+fi
+
+# [--get-regitries] Returns a list of logged in registries
+if [ "${_get_regitries:-0}" -eq 1 ]; then
+  check_config
+  jq -er '
+    .auths | to_entries[] | [
+      .key, ( .value.auth | @base64d | split(":") | first )
+    ] | @tsv' "$docker_config_file" ||
+    fail "broken $docker_config_file file"
+  exit 0
+fi
+
+# [--logout] Logout from registry
+if [ "${_logout:-0}" -eq 1 ]; then
+  check_config
+  loged_out_data="$(
+    jq -er --arg registry "${registry:-$default_registry}" \
+      'select(.auths[$registry]) | del(.auths[$registry])' \
+      "$docker_config_file" ||
+      fail "not logged into $registry"
+  )"
+  echo "$loged_out_data" > "$docker_config_file"
+  echo "logout from $registry"
+  exit 0
+fi
+
+# [--get-token] Return a token for an already existing registry
+if [ "${_get_token:-0}" -eq 1 ]; then
+  check_config
+  registry_login
+  exit 0
+fi
+
+# Get config data
+# -------------------------------------------------------------------------
+# Load config
+if [ -s "$docker_config_file" ]; then
+  # Check login exists
+  jq -er --arg registry "${registry:-$default_registry}" \
+      '.auths[$registry].auth' "$docker_config_file" &> /dev/null ||
+    fresh_login=1
+  config_data="$(jq -er '.' "$docker_config_file")"
+else
+  config_data='{"auths":{}}'
+fi
+
+# Get login and password
+# -------------------------------------------------------------------------
+# Get login and password from exist config
+if [ -s "$docker_config_file" ]; then
+  [ -z "${username:-}" ] && username=$(get_auth 0 || :)
+  [ -z "${password:-}" ] && password=$(get_auth 1 || :)
+fi
+
+# Get username and password
+if [ ! -t 0 ] && [ -z "${password:-}" ]; then
+  # Password from stdin
+  [ "${_pass_stdin:-0}" -eq 1 ] && read -r password
+else
+  # Username and password stdin prompt if not provided
+  [ -z "${username:-}" ] && read -p 'Username: ' -r username
+  [ -z "${password:-}" ] && read -p 'Password: ' -rs password
+fi
+
+[ -z "${username:-}" ] && fail "username not provided"
+[ -z "${password:-}" ] && fail "password not provided"
+
+
+# Login
+# -------------------------------------------------------------------------
+# Try to login with exist credententials
+if [ ${fresh_login:-0} -eq 1 ]; then
+  echo login first
+  registry_login
+else
+  echo try login with exist data
+  registry_login
+fi
+
+# Save credentials
+# -------------------------------------------------------------------------
+# Write login/password to config
+jq -er \
+  --arg registry "${registry:-$default_registry}" \
+  --arg auth "$username:$password" \
+  '.auths += {($registry): {auth: ( $auth | @base64 ) }}' <<< "$config_data" \
+    > "$docker_config_file" ||
+  {
+    cat <<< "$config_data" > "$docker_config_file"
+    fail "authorization data is invalid"
+  }
+
+echo "Login to $registry with $username:$password"
+
+exit 0

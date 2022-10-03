@@ -1,0 +1,269 @@
+#!/kaniko/bin/bash
+# PKCI (create SVG badge)
+#
+# Pumped Kaniko Container Image or Pumped Kaniko for Continuous Integration
+# =========================================================================
+#
+# License: MIT
+# Copyright 2022 WoozyMasta <me@woozymasta.ru>
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+#
+# =========================================================================
+set -euo pipefail
+
+fail() { >&2 printf '%s\n' "$*"; exit 1; }
+is_num() {
+  [[ ${!1} =~ ^[0-9]+$ ]] || fail "$1 must be number"
+  [ "${!1}" -le "$2" ] || fail "Badge ${3:-$1} cannot be greater than $2"
+}
+minify_svg() {
+  if [[ ${1,,} =~ ^(false|no|n|0)$ ]]; then
+    sed \
+      -e 's/^[ \t]*//g' \
+      -e ':a;N;$!ba;s/\n//g' \
+      -e 's/ \{1,\}/ /g' \
+      -e 's/> </></g'
+  else
+    cat
+  fi
+}
+usage() {
+>&2 cat <<usage
+Create SVG badge
+
+Example usage:
+  $0 pipeline passed green
+  $0 -k status -v warning -c red -o --mono warning.svg
+  SVG_BADGE_KEY=release SVG_BADGE_VALUE=v1.2.3 $0 > result.svg
+
+Positional arguments:
+  $0 [1]key [2]value [3]color
+
+[short] [long key]          [environment variable]       [default]
+------------------------------------------------------------------
+  -o    --out-file          SVG_BADGE_FILE
+  -k    --key               SVG_BADGE_KEY                key
+  -v    --value             SVG_BADGE_VALUE              value
+  -c    --color             SVG_BADGE_VALUE_COLOR        blue
+  -p    --padding           SVG_BADGE_PADDING            10
+  -r    --corner-radius     SVG_BADGE_CORNER_RADIUS      3
+  -g    --gradient-opacity  SVG_BADGE_GRADIENT_OPACITY   1
+  -s    --text-shadow       SVG_BADGE_TEXT_SHADOW        10
+        --mono              SVG_BADGE_FONT_MONO
+        --no-svg-minify     SVG_BADGE_NO_MINIFY
+  -h    --help
+usage
+exit 0
+}
+
+
+# Args parse
+# ==========
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -h|--help)              usage;;
+    -k|--key)               SVG_BADGE_KEY="$2";               shift; shift;;
+    -o|--out-file)          SVG_BADGE_FILE="$2";              shift; shift;;
+    -v|--value)             SVG_BADGE_VALUE="$2";             shift; shift;;
+    -c|--color)             SVG_BADGE_VALUE_COLOR="$2";       shift; shift;;
+    -p|--padding)           SVG_BADGE_PADDING="$2";           shift; shift;;
+    -r|--corner-radius)     SVG_BADGE_CORNER_RADIUS="$2";     shift; shift;;
+    -g|--gradient-opacity)  SVG_BADGE_GRADIENT_OPACITY="$2";  shift; shift;;
+    -s|--text-shadow)       SVG_BADGE_TEXT_SHADOW="$2";       shift; shift;;
+       --mono)              SVG_BADGE_FONT_MONO=true;         shift;;
+       --no-svg-minify)     SVG_BADGE_NO_MINIFY=true;         shift;;
+    -*)                     fail "Unknown option $1";;
+    *)                      _svgb_args+=("$1");               shift;;
+  esac
+done
+
+# Extra args
+# ==========
+[ -n "${_svgb_args[0]:-}" ] && [ -z "${SVG_BADGE_KEY:-}" ] &&
+  SVG_BADGE_KEY="${_svgb_args[0]}"
+[ -n "${_svgb_args[1]:-}" ] && [ -z "${SVG_BADGE_VALUE:-}" ] &&
+  SVG_BADGE_VALUE="${_svgb_args[1]}"
+[ -n "${_svgb_args[2]:-}" ] && [ -z "${SVG_BADGE_VALUE_COLOR:-}" ] &&
+  SVG_BADGE_VALUE_COLOR="${_svgb_args[2]}"
+
+# Environments
+# ============
+# Badge key
+: "${SVG_BADGE_KEY:?Pass key as first argument or show help$(usage)}"
+# Badge value
+: "${SVG_BADGE_VALUE:?Pass value as second argument or show help$(usage)}"
+# Badge file
+: "${SVG_BADGE_FILE:=/dev/stdout}"
+# Badge styling
+: "${SVG_BADGE_VALUE_COLOR:=blue}}"
+: "${SVG_BADGE_FONT_MONO:=false}"
+: "${SVG_BADGE_PADDING:=10}}"
+is_num SVG_BADGE_PADDING 50 padding
+: "${SVG_BADGE_CORNER_RADIUS:=3}}"
+is_num SVG_BADGE_CORNER_RADIUS 10 'corner radius'
+: "${SVG_BADGE_GRADIENT_OPACITY:=1}}"
+is_num SVG_BADGE_GRADIENT_OPACITY 9 'gradient opacity'
+: "${SVG_BADGE_TEXT_SHADOW:=10}}"
+is_num SVG_BADGE_TEXT_SHADOW 20 'text shadow'
+_svgb_shadow=$((130 + SVG_BADGE_TEXT_SHADOW))
+: "${SVG_BADGE_NO_MINIFY:=false}"
+
+# Badge length and dimensions
+# ===========================
+_svgb_key_len=$((${#SVG_BADGE_KEY} * 6 + SVG_BADGE_PADDING))
+_svgb_key_text_len=$((${#SVG_BADGE_KEY} * 60))
+_svgb_key_text_start=$((_svgb_key_len * 5))
+_svgb_val_len=$((${#SVG_BADGE_VALUE} * 6 + SVG_BADGE_PADDING))
+_svgb_val_text_len=$((${#SVG_BADGE_VALUE} * 60))
+_svgb_val_text_start=$(((_svgb_key_len * 10) + _svgb_val_len * 5))
+_svgb_total_len=$((_svgb_key_len + _svgb_val_len))
+
+# Colors
+# ======
+declare -a _svgb_args=()
+declare -A colors=(
+  [black]='#222'
+  [pink]='#E5B'
+  [orange]='#F73'
+  [cyan]='#1BC'
+  [purple]='#94E'
+  [blue]='#08C'
+  [yellow]='#DB1'
+  [green]='#3C1'
+  [red]='#E43'
+  [gray]='#999'
+)
+_color_names="$(printf "%s, " "${!colors[@]}")"
+_color_names="${_color_names::-2}"
+
+
+if [ "${SVG_BADGE_VALUE_COLOR:0:1}" == '#' ]; then
+  if [[ ${SVG_BADGE_VALUE_COLOR} =~ ^#([[:xdigit:]]{3}){1,2}$ ]]; then
+    _svgb_val_color="$SVG_BADGE_VALUE_COLOR"
+  else
+    fail 'Invalid hex color'
+  fi
+else
+  if [ "${colors[$SVG_BADGE_VALUE_COLOR]+null}" ]; then
+    _svgb_val_color="${colors[$SVG_BADGE_VALUE_COLOR]}"
+  else
+    fail "Color does not exist, available colors are: $_color_names"
+  fi
+fi
+
+# Font family
+# ===========
+if [[ ${SVG_BADGE_FONT_MONO,,} =~ ^(true|yes|y|1)$ ]]; then
+  _svgb_font_family="monospace"
+else
+  _svgb_font_family="Verdana,DejaVu Sans,sans-serif"
+fi
+
+# Make SVG
+# ========
+cat <<badge | minify_svg "$SVG_BADGE_NO_MINIFY" > $SVG_BADGE_FILE
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  xmlns:xlink="http://www.w3.org/1999/xlink" role="img"
+  width="$_svgb_total_len" height="20"
+  aria-label="$SVG_BADGE_KEY: $SVG_BADGE_VALUE">
+
+  <title>$SVG_BADGE_KEY: $SVG_BADGE_VALUE</title>
+
+$( [ $SVG_BADGE_GRADIENT_OPACITY -gt 0 ] &&
+cat <<badge-gradient
+  <linearGradient id="s" x2="0" y2="100%">
+    <stop offset="0" stop-color="#bbb" stop-opacity=".$SVG_BADGE_GRADIENT_OPACITY"/>
+    <stop offset="1" stop-opacity=".$SVG_BADGE_GRADIENT_OPACITY"/>
+  </linearGradient>
+badge-gradient
+)
+
+$( if [ $SVG_BADGE_CORNER_RADIUS -gt 0 ]; then
+cat <<badge-radius
+  <clipPath id="r">
+    <rect
+      width="$_svgb_total_len" height="20"
+      rx="$SVG_BADGE_CORNER_RADIUS"/>
+  </clipPath>
+  <g clip-path="url(#r)">
+badge-radius
+else
+  echo '<g>'
+fi
+)
+
+    <rect
+      width="$_svgb_key_len" height="20"
+      fill="#555"/>
+    <rect
+      width="$_svgb_val_len" height="20"
+      fill="$_svgb_val_color" x="$_svgb_key_len"/>
+    <rect
+      width="$_svgb_total_len" height="20"
+      fill="url(#s)"/>
+  </g>
+
+  <g
+    fill="#fff" font-size="110" text-anchor="middle"
+    font-family="$_svgb_font_family"
+    text-rendering="geometricPrecision">
+
+$( [ $SVG_BADGE_TEXT_SHADOW -gt 0 ] &&
+cat <<badge-shadow
+    <text
+      textLength="$_svgb_key_text_len"
+      x="$_svgb_key_text_start"
+      y="$_svgb_shadow" fill="#010101" fill-opacity=".3"
+      transform="scale(.1)" aria-hidden="true">$SVG_BADGE_KEY</text>
+    <text
+      textLength="$_svgb_val_text_len"
+      x="$_svgb_val_text_start"
+      y="$_svgb_shadow" fill="#010101" fill-opacity=".3"
+      transform="scale(.1)" aria-hidden="true">$SVG_BADGE_VALUE</text>
+badge-shadow
+)
+
+    <text
+      textLength="$_svgb_key_text_len"
+      x="$_svgb_key_text_start"
+      y="130" fill="#fff" transform="scale(.1)">$SVG_BADGE_KEY</text>
+    <text
+      textLength="$_svgb_val_text_len"
+      x="$_svgb_val_text_start"
+      y="130" fill="#fff" transform="scale(.1)">$SVG_BADGE_VALUE</text>
+
+  </g>
+</svg>
+badge
+
+exit 0
+
+# Examples
+bash ./src/bin/svg-badge one two > test-1.svg
+bash ./src/bin/svg-badge two test -c green -o test-2.svg
+bash ./src/bin/svg-badge -k three -v some -c '#F0F' -o test-3.svg -p 49
+SVG_BADGE_KEY=four SVG_BADGE_VALUE=⚠️ SVG_BADGE_FILE=test-4.svg \
+  bash ./src/bin/svg-badge
+bash ./src/bin/svg-badge -k five -v '🤨️ hmmm 🤨️' -c '#DD9' \
+  -o test-5.svg -r 0 -g 0 -s 0 --mono --no-svg-minify
+bash ./src/bin/svg-badge -k six \
+  --value 'Ut fugiat tempor magna occaecat adipisicing voluptate elit non.' \
+  -r 10 -g 8 -s 5 -o test-6.svg -c pink

@@ -1,0 +1,238 @@
+
+# PKCI extra (UPX)
+# Pumped Kaniko Container Image for Continuous Integration
+# =========================================================================
+#
+# License: MIT
+# Copyright 2022 WoozyMasta <me@woozymasta.ru>
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+#
+# =========================================================================
+# The file was generated automatically
+# ⚠️ Do not edit it yourself before publishing changes to the project ⚠️
+# Generated at: 2022-06-30T16:08:47+00:00
+# =========================================================================
+
+ARG VER_KANIKO=1.8.1
+ARG VER_BUSYBOX=1.34.1
+ARG VER_GO=1.18
+ARG VER_COSIGN=1.9.0
+ARG VER_NOTARY=0.7.0
+ARG VER_OPENSSL=3.0.3
+
+# == Kaniko ==
+# ============
+FROM gcr.io/kaniko-project/executor:v$VER_KANIKO AS kaniko
+
+# == Busybox ==
+# =============
+FROM docker.io/busybox:$VER_BUSYBOX AS busybox
+
+# == OpenSSL ==
+# =============
+FROM docker.io/ep76/openssl-static:$VER_OPENSSL AS openssl
+
+# == Cosign ==
+# =============
+FROM gcr.io/projectsigstore/cosign:v$VER_COSIGN AS cosign
+
+# == Notary-signer ==
+# ===================
+FROM docker.io/notary:signer-$VER_NOTARY AS notary
+
+# == Binaries ==
+# ==============
+FROM docker.io/golang:$VER_GO-bullseye AS binaries
+ARG VER_UPX=3.96
+ARG VER_BASH=5.1.016-1.2.3
+ARG VER_PUSHRM=1.8.1
+ARG VER_HADOLINT=2.10.0
+ARG VER_JQ=1.6
+ARG VER_CURL=7.83.1
+ARG VER_MDTOHTML=latest
+ARG VER_OPENSSL=3.0.3
+ARG VER_CRANE=0.9.0
+ARG VER_TEMPLAR=0.5.1
+ARG VER_TOKEI=12.1.2
+ARG VER_YQ=4.25.2
+ARG VER_TRIVY=0.29.2
+ARG VER_GOMPLATE=3.11.1
+ARG VER_KUBECTL=1.24.1
+ARG VER_HELM=3.9.0
+ARG VER_JSONBUILDER=0.5.1
+ARG VER_TANKA=0.22.1
+ARG VER_KUBELINTER=0.3.0
+ARG VER_KUBESEC=2.11.4
+
+# hadolint ignore=DL3008
+RUN set -eux && \
+    apt-get update && \
+    apt-get install --no-install-recommends -y curl ca-certificates xz-utils && \
+    curl -sLo upx.tar.xz \
+      "https://github.com/upx/upx/releases/download/v$VER_UPX/upx-$VER_UPX-amd64_linux.tar.xz" && \
+      tar -xvf upx.tar.xz --strip-components=1 "upx-$VER_UPX-amd64_linux/upx" && \
+      chmod +x upx && \
+      cp upx /usr/local/bin/upx && \
+      rm -f upx.tar.xz
+
+WORKDIR /kaniko
+
+# Kaniko
+RUN mkdir -p bin ssl .docker .config .kube .cache
+COPY --from=kaniko /kaniko/executor ./executor
+RUN ln -s /kaniko/executor /kaniko/bin/kaniko && \
+    upx --no-progress --no-color /kaniko/executor && \
+    upx -t --no-progress --no-color /kaniko/executor
+
+WORKDIR /kaniko/bin
+
+
+# Kaniko credential helpers
+COPY --from=kaniko /kaniko/docker-credential-* ./
+
+
+# Busybox
+COPY --from=busybox /bin/ ./
+# OpenSSL
+COPY --from=openssl /usr/bin/openssl ./openssl
+# Cosign
+COPY --from=cosign /ko-app/cosign ./cosign
+# Notary
+COPY --from=notary /notary/signer/notary-signer ./notary-signer
+
+
+RUN set -eux && \
+    curl -sLo bash \
+      "https://github.com/robxu9/bash-static/releases/download/$VER_BASH/bash-linux-x86_64" && \
+    curl -sLo hadolint \
+      "https://github.com/hadolint/hadolint/releases/download/v$VER_HADOLINT/hadolint-Linux-x86_64" && \
+    curl -sLo pushrm \
+      "https://github.com/christian-korneck/docker-pushrm/releases/download/v$VER_PUSHRM/docker-pushrm_linux_amd64" && \
+    curl -sLo jq \
+      "https://github.com/stedolan/jq/releases/download/jq-$VER_JQ/jq-linux64" && \
+    curl -sLo curl \
+      "https://github.com/moparisthebest/static-curl/releases/download/v$VER_CURL/curl-amd64" && \
+    go install github.com/gomarkdown/mdtohtml@$VER_MDTOHTML && \
+      mv /go/bin/mdtohtml mdtohtml && \
+    curl -sLo crane.tar.gz \
+      "https://github.com/google/go-containerregistry/releases/download/v$VER_CRANE/go-containerregistry_Linux_x86_64.tar.gz" && \
+      tar -xvf crane.tar.gz crane && \
+      rm -f crane.tar.gz && \
+    curl -sLo templar.tar.xz \
+      "https://github.com/proctorlabs/templar/releases/download/v$VER_TEMPLAR/templar-x86_64-unknown-linux-musl.tar.xz" && \
+      tar -xvf templar.tar.xz templar && \
+      rm -f templar.tar.xz && \
+    curl -sLo tokei.tar.gz \
+      "https://github.com/XAMPPRocky/tokei/releases/download/v$VER_TOKEI/tokei-x86_64-unknown-linux-musl.tar.gz" && \
+      tar -xvf tokei.tar.gz tokei && \
+      rm -f tokei.tar.gz && \
+    curl -sLo yq \
+      "https://github.com/mikefarah/yq/releases/download/v$VER_YQ/yq_linux_amd64" && \
+    curl -sLo gomplate \
+      "https://github.com/hairyhenderson/gomplate/releases/download/v$VER_GOMPLATE/gomplate_linux-amd64-slim" && \
+    curl -sLo kubectl \
+      "https://storage.googleapis.com/kubernetes-release/release/v$VER_KUBECTL/bin/linux/amd64/kubectl" && \
+    curl -sLo helm.tar.gz \
+      "https://get.helm.sh/helm-v$VER_HELM-linux-amd64.tar.gz" && \
+      tar -xvf helm.tar.gz --strip-components=1 linux-amd64/helm && \
+      rm -f helm.tar.gz && \
+    curl -sLo trivy.tar.gz \
+      "https://github.com/aquasecurity/trivy/releases/download/v$VER_TRIVY/trivy_${VER_TRIVY}_Linux-64bit.tar.gz" && \
+      tar -xvf trivy.tar.gz trivy contrib && \
+      mv contrib ../contrib && \
+      rm -f trivy.tar.gz && \
+    curl -sLo kube-linter \
+      "https://github.com/stackrox/kube-linter/releases/download/$VER_KUBELINTER/kube-linter-linux" && \
+    curl -sLo kubesec.tar.gz \
+      "https://github.com/controlplaneio/kubesec/releases/download/v$VER_KUBESEC/kubesec_linux_amd64.tar.gz" && \
+      tar -xvf kubesec.tar.gz kubesec && \
+      rm -f kubesec.tar.gz && \
+    curl -sLo tk \
+      "https://github.com/grafana/tanka/releases/download/v$VER_TANKA/tk-linux-amd64" && \
+    curl -sLo jb \
+      "https://github.com/jsonnet-bundler/jsonnet-bundler/releases/download/v$VER_JSONBUILDER/jb-linux-amd64"
+
+
+# hadolint ignore=DL4006,DL3059
+RUN set -eux && \
+    chmod -cR a+x,u+w,go-w ./ && \
+    chown -cR 0:0 ./ && \
+    find ./ -executable -type f -links 1 -print0 | xargs --null -- upx --no-progress --no-color || true && \
+    find ./ -executable -type f -links 1 -print0 | xargs --null -- upx -t --no-progress --no-color
+
+# SSL
+WORKDIR /kaniko/ssl/certs
+RUN cp /etc/ssl/certs/ca-certificates.crt ./
+
+# OpenSSL
+WORKDIR /kaniko/ssl
+RUN curl -sLo openssl.cnf \
+      "https://raw.githubusercontent.com/openssl/openssl/openssl-$VER_OPENSSL/apps/openssl.cnf"
+
+# == Build Image ==
+# =================
+FROM scratch
+
+# Binaries
+COPY --from=binaries /kaniko /kaniko
+COPY /src/bin /kaniko/bin
+ENV PATH /usr/local/bin:/kaniko/bin:/kaniko
+# hadolint ignore=DL4005
+RUN ["/kaniko/bin/sh", "-c", "set -eux && mkdir -p /bin /usr/bin && ln -s /kaniko/bin/sh /bin/sh && ln -s /kaniko/bin/bash /bin/bash && ln -s /kaniko/bin/env /usr/bin/env"]
+VOLUME /kaniko
+
+# nsswitch
+COPY --from=binaries /etc/nsswitch.conf /etc/nsswitch.conf
+
+# Certificates
+ENV SSL_CERT_DIR=/kaniko/ssl/certs
+ENV SSL_CERT_FILE=/kaniko/ssl/certs/ca-certificates.crt
+# OpenSSL config
+ENV OPENSSL_CONF=/kaniko/ssl/openssl.cnf
+
+# Environments
+ENV HOME /root
+ENV USER root
+ENV DOCKER_CONFIG /kaniko/.docker/
+ENV DOCKER_CREDENTIAL_GCR_CONFIG /kaniko/.config/gcloud/docker_credential_gcr_config.json
+ENV KUBECONFIG /kaniko/.kube/config
+ENV TRIVY_CACHE_DIR /kaniko/.cache
+
+WORKDIR /workspace
+
+# Labels
+ARG TIMESTAMP=2022-06-30T16:08:47+00:00
+LABEL org.opencontainers.image.created="$TIMESTAMP"
+LABEL org.opencontainers.image.url=ghcr.io/woozymasta/pkci:latest
+LABEL org.opencontainers.image.version=latest+
+LABEL org.opencontainers.image.title=PKCI
+LABEL org.opencontainers.image.description="Pumped Kaniko Container Image for Continuous Integration"
+LABEL org.opencontainers.image.authors="WoozyMasta <me@woozymasta.ru>"
+LABEL org.opencontainers.image.documentation=https://github.com/WoozyMasta/pkci
+LABEL org.opencontainers.image.revision=
+LABEL org.opencontainers.image.licenses=MIT
+
+ENTRYPOINT ["/kaniko/executor"]
+
+# =========================================================================
+# The file was generated automatically
+# ⚠️ Do not edit it yourself before publishing changes to the project ⚠️
+# Generated at: 2022-06-30T16:08:47+00:00
+# =========================================================================

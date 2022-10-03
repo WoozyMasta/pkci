@@ -1,0 +1,152 @@
+{{ pkci.default = 'normal' -}}
+{% if env('PROJECT_TYPE') | default(pkci.default) == 'slim' %}
+{{-   pkci.type = env('PROJECT_TYPE') }}{{ pkci.mode = 0 -}}
+{% else if env('PROJECT_TYPE') | default(pkci.default) == 'extra'%}
+{{-   pkci.type = env('PROJECT_TYPE') }}{{ pkci.mode = 2 -}}
+{% else %}
+{{-   pkci.type = pkci.default }}{{ pkci.mode = 1 -}}
+{% end if -%}
+
+{% if env('PROJECT_VERSION') | length > 0 %}
+{{-  pkci.version = env('PROJECT_VERSION') }}
+{{-  pkci.tag = env('PROJECT_VERSION') }}
+{% else %}
+{{-  pkci.version = ('latest+' ~ pkci.sha_commit) }}
+{{-  pkci.tag = 'latest' }}
+{% end if -%}
+
+{{ pkci.timestamp = command('date', '-uIs') }}{{ pkci.timestamp = pkci.timestamp.stdout }}
+{{ pkci.year = command('date', '+%Y') }}{{ pkci.year = pkci.year.stdout }}
+{{ pkci.sha_commit = command('git', 'rev-parse', 'HEAD') }}{{ pkci.sha_commit = pkci.sha_commit.stdout }}
+<!--
+PKCI
+
+Pumped Kaniko Container Image
+ or
+Pumped Kaniko for Continuous Integration
+===============================================================================
+
+License: MIT
+Copyright {{ pkci.year | trim }} WoozyMasta <me@woozymasta.ru>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to
+deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+
+===============================================================================
+{{ file('./src/.generated') }}
+Generated at: {{ pkci.timestamp | trim }}
+-->
+
+# PKCI
+
+![logo](./assets/logo.png)
+
+> _**P**umped **K**aniko **C**ontainer **I**mage_ or
+> _**P**umped **K**aniko for **C**ontinuous **I**ntegration_
+
+This is an alternative container image for
+[Google Container Tools Kaniko](https://github.com/GoogleContainerTools/kaniko),
+extended with the installed utilities bash, curl, jq and others.
+
+The reason for the appearance of this container is the need to execute
+additional logic inside the container in the CI pipelines. The original
+kaniko image is delivered on the basis of a scratch image, and the debug
+container has no version tags and contains only busybox from the utilities.
+
+![logo](./assets/scheme.drawio.png)
+
+> **ℹ️ Note:**
+> This image does not contain authentication helpers, it is like kaniko-slim.
+
+Extends the original container image using the following utilities:
+
+https://github.com/GoogleContainerTools/kaniko
+Build Container Images In Kubernetes 
+
+https://busybox.net
+BusyBox combines tiny versions of many common UNIX utilities into a single small executable. It provides replacements for most of the utilities you usually find in GNU fileutils, shellutils, etc.
+
+https://www.gnu.org/software/bash/
+Bash is the GNU Project's shell—the Bourne Again SHell. This is an sh-compatible shell that incorporates useful features from the Korn shell (ksh) and the C shell (csh). It is intended to conform to the IEEE POSIX P1003.2/ISO 9945.2
+
+https://github.com/hadolint/hadolint
+Dockerfile linter, validate inline bash, written in Haskell 
+
+https://github.com/christian-korneck/docker-pushrm
+"Docker Push Readme" - a Docker CLI plugin to update container repo docs 
+
+https://stedolan.github.io/jq/
+jq is a lightweight and flexible command-line JSON processor
+
+
+--
+
+https://github.com/sigstore/cosign
+Container Signing, Verification and Storage in an OCI registry.
+
+https://github.com/notaryproject/notary
+Notary signer, which stores private keys for and signs metadata for the Notary server
+
+https://www.openssl.org
+The OpenSSL Project develops and maintains the OpenSSL software - a robust, commercial-grade, full-featured toolkit for general-purpose cryptography and secure communication.
+
+https://curl.se
+command line tool and library for transferring data with URLs 
+
+https://github.com/gomarkdown/mdtohtml
+Command-line tool to convert markdown to htm with https://github.com/gomarkdown/markdown library
+
+https://github.com/proctorlabs/templar/
+Dynamic rust templating framework. The usage and style is inspired by both Jinja2 and Ansible
+
+https://github.com/chrismellard/docker-credential-acr-env
+https://github.com/GoogleCloudPlatform/docker-credential-gcr
+https://github.com/awslabs/amazon-ecr-credential-helper
+A Docker credential helpers
+
+
+--
+
+https://github.com/mikefarah/yq
+yq is a portable command-line YAML, JSON and XML processor 
+
+https://github.com/aquasecurity/trivy
+Scanner for vulnerabilities in container images, file systems, and Git repositories, as well as for configuration issues and hard-coded secrets 
+
+https://docs.gomplate.ca
+gomplate is a template renderer which supports a growing list of datasources, such as: JSON (including EJSON - encrypted JSON), YAML, AWS EC2 metadata, BoltDB, Hashicorp Consul and Hashicorp Vault secrets.
+
+https://github.com/kubernetes/kubectl
+Kubernetes provides a command line tool for communicating with a Kubernetes cluster's control plane, using the Kubernetes API.
+
+https://github.com/helm/helm
+The package manager for Kubernetes
+
+https://github.com/XAMPPRocky/tokei
+Tokei is a program that displays statistics about your code. Tokei will show the number of files, total lines within those files and code, comments, and blanks grouped by language.
+
+https://github.com/jsonnet-bundler/jsonnet-bundler
+The jsonnet-bundler is a package manager for Jsonnet
+
+https://github.com/grafana/tanka
+The clean, concise and super flexible alternative to YAML for your Kubernetes cluster
+
+> **ℹ️ Note:**
+> This container image is generated automatically every day if a new version of kaniko is released.
+
+--ignore-path     /busybox \
